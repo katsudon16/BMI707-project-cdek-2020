@@ -3,4 +3,4 @@ class Test:
     self.text = text
   
   def print(self):
-    print('Printing the text:', self.text)
+    print('Printing:', self.text)
