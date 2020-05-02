@@ -4,9 +4,7 @@ from __future__ import print_function
 import pandas as pd
 metadata_plus = pd.read_csv('/content/drive/My Drive/HMS BMI/BMI707/BMI707_team_cdek/metadata_preprocessed_for_chen.csv')
 abstracts = metadata_plus[['abstract','title','norm_asbtract','norm_asbtract_sc_removed', 'norm_title', 'norm_title_sc_removed','norm_title_sc_removed_lem', 'norm_abstract_sc_removed_lem']]
-abstracts.dropna(inplace = True) 
-
-
+abstracts.dropna(inplace = True)
 
 from keras.callbacks import LambdaCallback
 from keras.models import Sequential
@@ -19,6 +17,9 @@ import random
 import sys
 import io
 
+from string import printable
+printable_set = set(printable)
+
 ## helper functions
 def sample(preds, temperature=1.0):
     # helper function to sample an index from a probability array
@@ -28,7 +29,6 @@ def sample(preds, temperature=1.0):
     preds = exp_preds / np.sum(exp_preds)
     probas = np.random.multinomial(1, preds, 1)
     return np.argmax(probas)
-
 
 def on_epoch_end(epoch, _):
     # Function invoked at end of each epoch. Prints generated text.
@@ -59,20 +59,34 @@ def on_epoch_end(epoch, _):
             sys.stdout.write(next_char)
             sys.stdout.flush()
         print()
-        
+
 print_callback = LambdaCallback(on_epoch_end=on_epoch_end)
+
+#---------------------
 
 
 ## subsample first 1000 abstracts for faster turnaround time
-text = abstracts['norm_abstract_sc_removed_lem'][:1000]
-text = '.'.join(text)
-chars = sorted(list(set(text))) # unique characters 
+abstracts = abstracts['abstract'].tolist()
+kept_abstracts = []
+for text in abstracts:
+    # ensure lowercase
+    text = str(text).lower()
+    keep = True
+    for c in text:
+        # remove text with 'non-printable' characters
+        if c not in st:
+            keep = False
+            break
+    if keep: kept_abstracts.append(text)
+
+text = ' '.join(text)
+chars = sorted(list(set(text))) # unique characters
 print('total chars:', len(chars))
 char_indices = dict((c, i) for i, c in enumerate(chars))
 indices_char = dict((i, c) for i, c in enumerate(chars))
 
 # cut the text in semi-redundant sequences of maxlen characters
-maxlen = 40 # size of sequence
+maxlen = 100 # size of sequence
 step = 5 # size of skip
 sentences = []
 next_chars = []
@@ -81,13 +95,14 @@ for i in range(0, len(text) - maxlen, step):
     next_chars.append(text[i + maxlen])
 print('nb sequences:', len(sentences))
 
-print('Vectorization...')
-x = np.zeros((len(sentences), maxlen, len(chars)), dtype=np.bool)
-y = np.zeros((len(sentences), len(chars)), dtype=np.bool)
-for i, sentence in enumerate(sentences):
-    for t, char in enumerate(sentence):
-        x[i, t, char_indices[char]] = 1
-    y[i, char_indices[next_chars[i]]] = 1
+def generate_training_data():
+    for i, sentence in enumerate(sentences):
+        x = np.zeros((1, maxlen, len(chars)), dtype=np.bool)
+        y = np.zeros((1, len(chars)), dtype=np.bool)
+        for t, char in enumerate(sentence):
+            x[0, t, char_indices[char]] = 1
+        y[0, char_indices[next_chars[i]]] = 1
+        yield(x, y)
 
 # build the model
 print('Build model...')
@@ -100,8 +115,4 @@ print(model.summary())
 optimizer = RMSprop(learning_rate=0.01)
 model.compile(loss='categorical_crossentropy', optimizer=optimizer)
 
-model.fit(x, y,
-          batch_size=128,
-          # change this to at least 20
-          epochs=1,
-          callbacks=[print_callback])    
+model.fit_generator(generate_training_data(), steps_per_epoch=20000, epochs=25, callbacks=[print_callback])
